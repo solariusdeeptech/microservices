@@ -1,9 +1,9 @@
 FROM julia:1.10-bookworm AS builder  
 WORKDIR /app  
 COPY Project.toml .  
-RUN julia --project=. -e "using Pkg; Pkg.Registry.update(); println(\"Registry updated.\"); Pkg.resolve(); println(\"Resolved.\"); Pkg.instantiate(); println(\"Instantiated.\"); Pkg.precompile(); println(\"Precompiled.\")"  
+RUN julia --project=. -e 'using Pkg; Pkg.Registry.update(); Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'  
 COPY src/ src/  
-RUN julia --project=. -e "include(\"src/warmup.jl\")" || true  
+RUN julia --project=. -e 'include("src/warmup.jl")' || true  
   
 FROM julia:1.10-bookworm  
 WORKDIR /app  

@@ -1,7 +1,8 @@
 FROM julia:1.10-bookworm AS builder  
 WORKDIR /app  
-COPY Project.toml .  
-RUN julia --project=. -e 'using Pkg; Pkg.Registry.update(); Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'  
+  
+RUN julia -e 'using Pkg; Pkg.activate("."); Pkg.add(["HTTP", "JSON3", "GeoStats", "Meshes", "GeoTables", "Distributions"]); Pkg.precompile()'  
+  
 COPY src/ src/  
 RUN julia --project=. -e 'include("src/warmup.jl")' || true  
   

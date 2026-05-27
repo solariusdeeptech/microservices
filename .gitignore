@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Environment
+.env
+*.env.local
+
+# Build artifacts
+*.tar.gz
+dist/
+build/
+
+# Julia
+.julia/
+Manifest.toml
+
+# Docker
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp

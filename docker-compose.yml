@@ -1,0 +1,68 @@
+# ============================================
+# Solarius Microservices — Docker Compose
+# Local development & testing
+# ============================================
+
+version: '3.9'
+
+services:
+  # --- Julia Geostat Service ---
+  julia-geostat:
+    build:
+      context: ./julia-geostat
+      dockerfile: Dockerfile
+    container_name: solarius-julia
+    ports:
+      - "8080:8080"
+    environment:
+      - JULIA_PORT=8080
+      - JULIA_NUM_THREADS=auto
+      - API_KEY_GEOECONOMIX=${API_KEY_GEOECONOMIX:-dev-geoeconomix-key}
+      - API_KEY_GEOMATRIX=${API_KEY_GEOMATRIX:-dev-geomatrix-key}
+      - API_KEY_TERRAEXPLORATION=${API_KEY_TERRAEXPLORATION:-dev-terra-key}
+    volumes:
+      - ./julia-geostat/src:/app/src:ro  # Hot reload in dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Julia prend du temps au 1er démarrage
+
+  # --- Python Viz Service ---
+  python-viz:
+    build:
+      context: ./python-viz
+      dockerfile: Dockerfile
+    container_name: solarius-python
+    ports:
+      - "8081:8081"
+    environment:
+      - PYTHON_PORT=8081
+      - PYVISTA_OFF_SCREEN=true
+      - API_KEY_GEOECONOMIX=${API_KEY_GEOECONOMIX:-dev-geoeconomix-key}
+      - API_KEY_GEOMATRIX=${API_KEY_GEOMATRIX:-dev-geomatrix-key}
+      - API_KEY_TERRAEXPLORATION=${API_KEY_TERRAEXPLORATION:-dev-terra-key}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # --- API Gateway (nginx) ---
+  gateway:
+    image: nginx:alpine
+    container_name: solarius-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      julia-geostat:
+        condition: service_healthy
+      python-viz:
+        condition: service_healthy
+    restart: unless-stopped

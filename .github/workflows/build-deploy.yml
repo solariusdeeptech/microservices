@@ -1,0 +1,113 @@
+# ============================================
+# CI/CD — Build, Push to Artifact Registry, Deploy to Cloud Run
+# Authentification via Workload Identity Federation (sans clé JSON)
+# ============================================
+
+name: Build & Deploy Microservices
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GCP_PROJECT_ID: microservices-497617
+  GCP_REGION: europe-west1
+  ARTIFACT_REGISTRY: europe-west1-docker.pkg.dev/microservices-497617/solarius
+
+permissions:
+  contents: read
+  id-token: write  # Requis pour Workload Identity Federation
+
+jobs:
+  # --- Build & Push Docker Images ---
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - name: julia-geostat
+            path: julia-geostat
+            port: 8080
+          - name: python-viz
+            path: python-viz
+            port: 8081
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \
+            -t ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:latest \
+            ./${{ matrix.service.path }}
+
+      - name: Push to Artifact Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }}
+          docker push ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:latest
+
+  # --- Deploy to Cloud Run ---
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - name: julia-geostat
+            port: 8080
+            memory: 4Gi
+            cpu: 2
+            timeout: 300
+            min_instances: 0
+            max_instances: 5
+          - name: python-viz
+            port: 8081
+            memory: 2Gi
+            cpu: 2
+            timeout: 300
+            min_instances: 0
+            max_instances: 5
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ matrix.service.name }} \
+            --image ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \
+            --region ${{ env.GCP_REGION }} \
+            --platform managed \
+            --port ${{ matrix.service.port }} \
+            --memory ${{ matrix.service.memory }} \
+            --cpu ${{ matrix.service.cpu }} \
+            --timeout ${{ matrix.service.timeout }} \
+            --min-instances ${{ matrix.service.min_instances }} \
+            --max-instances ${{ matrix.service.max_instances }} \
+            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }}" \
+            --allow-unauthenticated \
+            --concurrency 10
+
+      - name: Get Service URL
+        run: |
+          URL=$(gcloud run services describe ${{ matrix.service.name }} \
+            --region ${{ env.GCP_REGION }} \
+            --format 'value(status.url)')
+          echo "🚀 ${{ matrix.service.name }} deployed at: $URL"

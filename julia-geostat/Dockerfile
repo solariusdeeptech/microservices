@@ -1,9 +1,10 @@
 FROM julia:1.10-bookworm AS builder
 WORKDIR /app
 COPY Project.toml .
-RUN julia -e 'using Pkg; Pkg.activate("."); Pkg.add(["HTTP", "JSON3", "GeoStats", "Meshes", "GeoTables", "Distributions", "PackageCompiler"]); Pkg.precompile()'
 COPY src/ src/
 COPY precompile_app.jl .
+RUN julia -e 'using Pkg; Pkg.activate("."); Pkg.add(["HTTP", "JSON3", "GeoStats", "Meshes", "GeoTables", "Distributions"]); Pkg.precompile()'
+RUN julia --project=. -e 'using Pkg; Pkg.add("PackageCompiler")'
 RUN julia --project=. -e 'using PackageCompiler; create_sysimage([:HTTP, :JSON3, :GeoStats, :Meshes, :GeoTables, :Distributions]; sysimage_path="/app/sysimage.so", precompile_execution_file="/app/precompile_app.jl")'
 FROM julia:1.10-bookworm
 WORKDIR /app

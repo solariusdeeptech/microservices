@@ -28,10 +28,10 @@ jobs:
             path: python-viz
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
@@ -45,7 +45,7 @@ jobs:
             -t ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \
             -t ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:latest \
             ./${{ matrix.service.path }}
-        timeout-minutes: 60  # Julia build with PackageCompiler takes ~30-40 min
+        timeout-minutes: 60
 
       - name: Push to Artifact Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -78,7 +78,7 @@ jobs:
 
     steps:
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
@@ -97,21 +97,13 @@ jobs:
             --max-instances ${{ matrix.service.max_instances }} \
             --concurrency ${{ matrix.service.concurrency }} \
             --cpu-boost \
-            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }}" \
+            --no-cpu-throttling \
+            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }},JULIA_NUM_THREADS=4" \
             --allow-unauthenticated
 
-      - name: Verify deployment
+      - name: Get Service URL
         run: |
           URL=$(gcloud run services describe ${{ matrix.service.name }} \
             --region ${{ env.GCP_REGION }} \
             --format 'value(status.url)')
-          echo "🚀 ${{ matrix.service.name }} deployed at: $URL"
-          # Test health check
-          sleep 10
-          HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health" || echo "000")
-          echo "Health check: HTTP $HTTP_CODE"
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ ${{ matrix.service.name }} is healthy!"
-          else
-            echo "⚠️ ${{ matrix.service.name }} health check returned $HTTP_CODE (may still be starting)"
-          fi
+          echo "Service ${{ matrix.service.name }} deployed at: $URL"

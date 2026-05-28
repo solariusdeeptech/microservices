@@ -1,8 +1,3 @@
-# ============================================
-# CI/CD — Build, Push to Artifact Registry, Deploy to Cloud Run
-# Authentification via Workload Identity Federation (sans clé JSON)
-# ============================================
-
 name: Build & Deploy Microservices
 
 on:
@@ -18,21 +13,19 @@ env:
 
 permissions:
   contents: read
-  id-token: write  # Requis pour Workload Identity Federation
+  id-token: write
 
 jobs:
-  # --- Build & Push Docker Images ---
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         service:
           - name: julia-geostat
             path: julia-geostat
-            port: 8080
           - name: python-viz
             path: python-viz
-            port: 8081
 
     steps:
       - uses: actions/checkout@v4
@@ -59,28 +52,20 @@ jobs:
           docker push ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }}
           docker push ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:latest
 
-  # --- Deploy to Cloud Run ---
   deploy:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         service:
           - name: julia-geostat
-            port: 8080
             memory: 4Gi
             cpu: 2
-            timeout: 300
-            min_instances: 0
-            max_instances: 5
           - name: python-viz
-            port: 8081
             memory: 2Gi
             cpu: 2
-            timeout: 300
-            min_instances: 0
-            max_instances: 5
 
     steps:
       - name: Authenticate to Google Cloud
@@ -95,12 +80,14 @@ jobs:
             --image ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \
             --region ${{ env.GCP_REGION }} \
             --platform managed \
-            --port ${{ matrix.service.port }} \
+            --port 8080 \
             --memory ${{ matrix.service.memory }} \
             --cpu ${{ matrix.service.cpu }} \
-            --timeout ${{ matrix.service.timeout }} \
-            --min-instances ${{ matrix.service.min_instances }} \
-            --max-instances ${{ matrix.service.max_instances }} \
+            --timeout 300 \
+            --min-instances 0 \
+            --max-instances 5 \
+            --no-cpu-throttling \
+            --startup-cpu-boost \
             --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }}" \
             --allow-unauthenticated \
             --concurrency 10
@@ -110,4 +97,4 @@ jobs:
           URL=$(gcloud run services describe ${{ matrix.service.name }} \
             --region ${{ env.GCP_REGION }} \
             --format 'value(status.url)')
-          echo "🚀 ${{ matrix.service.name }} deployed at: $URL"
+          echo "Service ${{ matrix.service.name }} deployed at: $URL"

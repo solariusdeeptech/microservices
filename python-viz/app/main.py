@@ -1,12 +1,5 @@
 """
 Solarius Microservices — Python Viz API Server
-
-Endpoints:
-  GET  /health       → Health check
-  POST /render-3d    → Rendu 3D block model (glTF/image export)
-  POST /mps          → Simulation Multi-Points (MPS)
-  POST /sections     → Génération de coupes géologiques
-  POST /drillholes   → Visualisation 3D de sondages
 """
 
 import os
@@ -24,21 +17,16 @@ from app.middleware.auth import verify_api_key
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup/shutdown events."""
-    logger.info("🚀 Solarius Python Viz API starting")
+    logger.info("Solarius Python Viz API starting")
     os.environ["PYVISTA_OFF_SCREEN"] = "true"
-
-    # Try importing PyVista but don't crash if it fails
     try:
         import pyvista as pv
         pv.OFF_SCREEN = True
         logger.info(f"VTK version: {pv.vtk_version}")
     except Exception as e:
         logger.warning(f"PyVista init warning (non-fatal): {e}")
-
     port = os.environ.get('PORT', '8080')
     logger.info(f"Listening on port {port}")
-    logger.info("Endpoints: /health, /render-3d, /mps, /sections, /drillholes")
     yield
     logger.info("Shutting down...")
 
@@ -50,7 +38,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -60,17 +47,15 @@ app.add_middleware(
 )
 
 
-# Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     elapsed = round((time.time() - start) * 1000, 1)
-    logger.info(f"{request.method} {request.url.path} → {response.status_code} ({elapsed}ms)")
+    logger.info(f"{request.method} {request.url.path} -> {response.status_code} ({elapsed}ms)")
     return response
 
 
-# Register routes
 app.include_router(health.router, tags=["Health"])
 app.include_router(render_3d.router, prefix="", tags=["3D Rendering"], dependencies=[Depends(verify_api_key)])
 app.include_router(mps.router, prefix="", tags=["MPS"], dependencies=[Depends(verify_api_key)])

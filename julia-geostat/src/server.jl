@@ -1,38 +1,87 @@
 #!/usr/bin/env julia
 """
 Solarius Microservices — Julia Geostat API Server
-
-Endpoints:
-  GET  /health          → Health check
-  POST /variography     → Variogramme expérimental + fitting
-  POST /kriging         → Krigeage ordinaire/simple
-  POST /sgs             → Simulation gaussienne séquentielle
-  POST /montecarlo      → Monte Carlo financier haute performance
-  POST /pit-optimize    → Optimisation de fosse Lerchs-Grossmann
-  POST /block-model     → Estimation modèle de blocs
+Lazy-loading architecture: starts HTTP server immediately,
+loads GeoStats packages on first actual API request.
 """
 
 using HTTP
 using JSON3
 using Logging
+using Dates
 
-# Import route handlers
-include("routes/health.jl")
-include("routes/variography.jl")
-include("routes/kriging.jl")
-include("routes/sgs.jl")
-include("routes/montecarlo.jl")
-include("routes/pit_optimize.jl")
-include("routes/block_model.jl")
+# Include lightweight middleware only
+include("middleware/cors.jl")
 include("middleware/auth.jl")
 include("middleware/logging.jl")
-include("middleware/cors.jl")
 
 # Cloud Run sets PORT env var
 const PORT = parse(Int, get(ENV, "PORT", get(ENV, "JULIA_PORT", "8080")))
 
+# Lazy loading state
+const ROUTES_LOADED = Ref(false)
+const LOADING_IN_PROGRESS = Ref(false)
+
+function json_headers()
+    return [
+        "Content-Type" => "application/json",
+        "Access-Control-Allow-Origin" => "*",
+        "X-Service" => "solarius-julia-geostat",
+    ]
+end
+
+# Health endpoint — works immediately, no GeoStats needed
+function handle_health_inline(req::HTTP.Request)
+    return HTTP.Response(200, json_headers(), JSON3.write(Dict(
+        "status" => ROUTES_LOADED[] ? "healthy" : "warming_up",
+        "service" => "julia-geostat",
+        "version" => "1.0.0",
+        "julia_version" => string(VERSION),
+        "timestamp" => string(now()),
+        "ready" => ROUTES_LOADED[],
+        "capabilities" => [
+            "variography", "kriging", "sgs",
+            "montecarlo", "pit_optimization", "block_model_estimation"
+        ]
+    )))
+end
+
+# Load heavy route modules on demand
+function ensure_routes_loaded()
+    if ROUTES_LOADED[]
+        return true
+    end
+    if LOADING_IN_PROGRESS[]
+        return false
+    end
+    LOADING_IN_PROGRESS[] = true
+    @info "Loading GeoStats packages (first API request)..."
+    try
+        include("routes/variography.jl")
+        @info "  variography loaded"
+        include("routes/kriging.jl")
+        @info "  kriging loaded"
+        include("routes/sgs.jl")
+        @info "  sgs loaded"
+        include("routes/montecarlo.jl")
+        @info "  montecarlo loaded"
+        include("routes/pit_optimize.jl")
+        @info "  pit_optimize loaded"
+        include("routes/block_model.jl")
+        @info "  block_model loaded"
+        ROUTES_LOADED[] = true
+        LOADING_IN_PROGRESS[] = false
+        @info "All GeoStats packages loaded successfully"
+        return true
+    catch e
+        LOADING_IN_PROGRESS[] = false
+        @error "Failed to load GeoStats packages" exception=(e, catch_backtrace())
+        return false
+    end
+end
+
 """
-Router principal — dispatche les requêtes vers les handlers
+Router principal
 """
 function router(req::HTTP.Request)
     # CORS preflight
@@ -40,20 +89,30 @@ function router(req::HTTP.Request)
         return cors_response()
     end
 
-    # Authenticate (sauf health check)
     path = HTTP.URI(req.target).path
-    if path != "/health"
-        auth_result = authenticate(req)
-        if auth_result !== nothing
-            return auth_result
-        end
+
+    # Health check — always works, no GeoStats needed
+    if path == "/health" && req.method == "GET"
+        return handle_health_inline(req)
+    end
+
+    # Authenticate
+    auth_result = authenticate(req)
+    if auth_result !== nothing
+        return auth_result
+    end
+
+    # Lazy load GeoStats on first real request
+    if !ensure_routes_loaded()
+        return HTTP.Response(503, json_headers(), JSON3.write(Dict(
+            "error" => "Service is loading GeoStats packages, please retry in 30 seconds",
+            "retry_after" => 30
+        )))
     end
 
     # Route dispatch
     try
-        if path == "/health" && req.method == "GET"
-            return handle_health(req)
-        elseif path == "/variography" && req.method == "POST"
+        if path == "/variography" && req.method == "POST"
             return handle_variography(req)
         elseif path == "/kriging" && req.method == "POST"
             return handle_kriging(req)
@@ -79,18 +138,9 @@ function router(req::HTTP.Request)
     end
 end
 
-function json_headers()
-    return [
-        "Content-Type" => "application/json",
-        "Access-Control-Allow-Origin" => "*",
-        "X-Service" => "solarius-julia-geostat",
-    ]
-end
-
 function main()
-    @info "🚀 Solarius Julia Geostat API starting on port $PORT"
-    @info "Endpoints: /health, /variography, /kriging, /sgs, /montecarlo, /pit-optimize, /block-model"
-    # Start server immediately — warmup is done at Docker build time
+    @info "Solarius Julia Geostat API starting on port $PORT"
+    @info "Health endpoint ready immediately. GeoStats loads on first API call."
     HTTP.serve(router, "0.0.0.0", PORT)
 end
 

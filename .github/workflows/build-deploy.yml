@@ -86,8 +86,7 @@ jobs:
             --timeout 300 \
             --min-instances 0 \
             --max-instances 5 \
-            --no-cpu-throttling \
-            --startup-cpu-boost \
+            --cpu-boost \
             --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }}" \
             --allow-unauthenticated \
             --concurrency 10

@@ -1,11 +1,13 @@
 FROM julia:1.10-bookworm AS builder
 WORKDIR /app
 COPY Project.toml .
-COPY src/ src/
+COPY install_packages.jl .
 COPY precompile_app.jl .
-RUN julia -e 'using Pkg; Pkg.activate("."); Pkg.add(["HTTP", "JSON3", "GeoStats", "Meshes", "GeoTables", "Distributions"]); Pkg.precompile()'
+COPY build_sysimage.jl .
+COPY src/ src/
+RUN julia install_packages.jl
 RUN julia --project=. -e 'using Pkg; Pkg.add("PackageCompiler")'
-RUN julia --project=. -e 'using PackageCompiler; create_sysimage([:HTTP, :JSON3, :GeoStats, :Meshes, :GeoTables, :Distributions]; sysimage_path="/app/sysimage.so", precompile_execution_file="/app/precompile_app.jl")'
+RUN julia --project=. build_sysimage.jl
 FROM julia:1.10-bookworm
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

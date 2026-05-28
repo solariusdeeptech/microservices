@@ -13,7 +13,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from loguru import logger
@@ -25,15 +25,19 @@ from app.middleware.auth import verify_api_key
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
-    logger.info("🚀 Solarius Python Viz API démarré")
-    logger.info(f"PyVista offscreen: {os.environ.get('PYVISTA_OFF_SCREEN', 'true')}")
-
-    # Set PyVista to offscreen mode (CPU rendering via OSMesa)
+    logger.info("🚀 Solarius Python Viz API starting")
     os.environ["PYVISTA_OFF_SCREEN"] = "true"
-    import pyvista as pv
-    pv.OFF_SCREEN = True
 
-    logger.info(f"VTK version: {pv.vtk_version}")
+    # Try importing PyVista but don't crash if it fails
+    try:
+        import pyvista as pv
+        pv.OFF_SCREEN = True
+        logger.info(f"VTK version: {pv.vtk_version}")
+    except Exception as e:
+        logger.warning(f"PyVista init warning (non-fatal): {e}")
+
+    port = os.environ.get('PORT', '8080')
+    logger.info(f"Listening on port {port}")
     logger.info("Endpoints: /health, /render-3d, /mps, /sections, /drillholes")
     yield
     logger.info("Shutting down...")

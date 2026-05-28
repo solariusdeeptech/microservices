@@ -45,7 +45,7 @@ jobs:
             -t ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \
             -t ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:latest \
             ./${{ matrix.service.path }}
-        timeout-minutes: 60
+        timeout-minutes: 180
 
       - name: Push to Artifact Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

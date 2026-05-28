@@ -1,8 +1,10 @@
 #!/usr/bin/env julia
 """
 Solarius Microservices — Julia Geostat API Server
-Lazy-loading architecture: starts HTTP server immediately,
-loads GeoStats packages on first actual API request.
+Version 2.0 — Eager loading (packages pre-compiled in sysimage)
+
+Avec le sysimage PackageCompiler, tous les packages sont déjà compilés.
+On charge tout directement au démarrage (3-5 secondes).
 """
 
 using HTTP
@@ -10,17 +12,13 @@ using JSON3
 using Logging
 using Dates
 
-# Include lightweight middleware only
+# Include middleware
 include("middleware/cors.jl")
 include("middleware/auth.jl")
 include("middleware/logging.jl")
 
 # Cloud Run sets PORT env var
 const PORT = parse(Int, get(ENV, "PORT", get(ENV, "JULIA_PORT", "8080")))
-
-# Lazy loading state
-const ROUTES_LOADED = Ref(false)
-const LOADING_IN_PROGRESS = Ref(false)
 
 function json_headers()
     return [
@@ -30,118 +28,116 @@ function json_headers()
     ]
 end
 
-# Health endpoint — works immediately, no GeoStats needed
-function handle_health_inline(req::HTTP.Request)
-    return HTTP.Response(200, json_headers(), JSON3.write(Dict(
-        "status" => ROUTES_LOADED[] ? "healthy" : "warming_up",
-        "service" => "julia-geostat",
-        "version" => "1.0.0",
-        "julia_version" => string(VERSION),
-        "timestamp" => string(now()),
-        "ready" => ROUTES_LOADED[],
-        "capabilities" => [
-            "variography", "kriging", "sgs",
-            "montecarlo", "pit_optimization", "block_model_estimation"
-        ]
-    )))
+# ---- Load ALL routes eagerly (sysimage = instant) ----
+@info "Loading route modules..."
+include("routes/health.jl")
+@info "  health loaded"
+include("routes/variography.jl")
+@info "  variography loaded"
+include("routes/kriging.jl")
+@info "  kriging loaded"
+include("routes/sgs.jl")
+@info "  sgs loaded"
+include("routes/montecarlo.jl")
+@info "  montecarlo loaded"
+include("routes/pit_optimize.jl")
+@info "  pit_optimize loaded"
+include("routes/block_model.jl")
+@info "  block_model loaded"
+@info "All route modules loaded successfully."
+
+# ---- Quick warmup to trigger remaining JIT ----
+@info "Running warmup..."
+try
+    include("warmup.jl")
+    @info "Warmup completed successfully."
+catch e
+    @warn "Warmup failed (non-fatal): $e"
 end
 
-# Load heavy route modules on demand
-function ensure_routes_loaded()
-    if ROUTES_LOADED[]
-        return true
-    end
-    if LOADING_IN_PROGRESS[]
-        return false
-    end
-    LOADING_IN_PROGRESS[] = true
-    @info "Loading GeoStats packages (first API request)..."
-    try
-        include("routes/variography.jl")
-        @info "  variography loaded"
-        include("routes/kriging.jl")
-        @info "  kriging loaded"
-        include("routes/sgs.jl")
-        @info "  sgs loaded"
-        include("routes/montecarlo.jl")
-        @info "  montecarlo loaded"
-        include("routes/pit_optimize.jl")
-        @info "  pit_optimize loaded"
-        include("routes/block_model.jl")
-        @info "  block_model loaded"
-        ROUTES_LOADED[] = true
-        LOADING_IN_PROGRESS[] = false
-        @info "All GeoStats packages loaded successfully"
-        return true
-    catch e
-        LOADING_IN_PROGRESS[] = false
-        @error "Failed to load GeoStats packages" exception=(e, catch_backtrace())
-        return false
-    end
-end
+const SERVER_READY = Ref(true)
+const STARTUP_TIME = now()
 
-"""
-Router principal
-"""
+# ---- Request Router ----
 function router(req::HTTP.Request)
+    start_time = time()
+    uri = HTTP.URI(req.target)
+    path = uri.path
+    method = uppercase(req.method)
+
     # CORS preflight
-    if req.method == "OPTIONS"
+    if method == "OPTIONS"
         return cors_response()
     end
 
-    path = HTTP.URI(req.target).path
-
-    # Health check — always works, no GeoStats needed
-    if path == "/health" && req.method == "GET"
-        return handle_health_inline(req)
+    # Health check (no auth)
+    if path == "/health" || path == "/"
+        response = HTTP.Response(200, json_headers(), JSON3.write(Dict(
+            "status" => "healthy",
+            "service" => "julia-geostat",
+            "version" => "2.0.0",
+            "julia_version" => string(VERSION),
+            "timestamp" => string(now()),
+            "ready" => true,
+            "uptime_seconds" => round(Dates.value(now() - STARTUP_TIME) / 1000, digits=1),
+            "sysimage" => true,
+            "capabilities" => [
+                "variography", "kriging", "sgs",
+                "montecarlo", "pit_optimization", "block_model_estimation"
+            ]
+        )))
+        return response
     end
 
-    # Authenticate
+    # Authenticate all other routes
     auth_result = authenticate(req)
     if auth_result !== nothing
         return auth_result
     end
 
-    # Lazy load GeoStats on first real request
-    if !ensure_routes_loaded()
-        return HTTP.Response(503, json_headers(), JSON3.write(Dict(
-            "error" => "Service is loading GeoStats packages, please retry in 30 seconds",
-            "retry_after" => 30
-        )))
-    end
-
-    # Route dispatch
+    # Route API endpoints
+    local response
     try
-        if path == "/variography" && req.method == "POST"
-            return handle_variography(req)
-        elseif path == "/kriging" && req.method == "POST"
-            return handle_kriging(req)
-        elseif path == "/sgs" && req.method == "POST"
-            return handle_sgs(req)
-        elseif path == "/montecarlo" && req.method == "POST"
-            return handle_montecarlo(req)
-        elseif path == "/pit-optimize" && req.method == "POST"
-            return handle_pit_optimize(req)
-        elseif path == "/block-model" && req.method == "POST"
-            return handle_block_model(req)
+        if path == "/api/variography" && method == "POST"
+            response = handle_variography(req)
+        elseif path == "/api/kriging" && method == "POST"
+            response = handle_kriging(req)
+        elseif path == "/api/sgs" && method == "POST"
+            response = handle_sgs(req)
+        elseif path == "/api/montecarlo" && method == "POST"
+            response = handle_montecarlo(req)
+        elseif path == "/api/pit-optimize" && method == "POST"
+            response = handle_pit_optimize(req)
+        elseif path == "/api/block-model" && method == "POST"
+            response = handle_block_model(req)
         else
-            return HTTP.Response(404, json_headers(), JSON3.write(Dict(
-                "error" => "Endpoint not found: $path"
+            response = HTTP.Response(404, json_headers(), JSON3.write(Dict(
+                "error" => "Not Found",
+                "path" => path,
+                "available_endpoints" => [
+                    "GET /health",
+                    "POST /api/variography",
+                    "POST /api/kriging",
+                    "POST /api/sgs",
+                    "POST /api/montecarlo",
+                    "POST /api/pit-optimize",
+                    "POST /api/block-model"
+                ]
             )))
         end
     catch e
-        @error "Unhandled error" exception=(e, catch_backtrace())
-        return HTTP.Response(500, json_headers(), JSON3.write(Dict(
+        @error "Request handler error" exception=(e, catch_backtrace())
+        response = HTTP.Response(500, json_headers(), JSON3.write(Dict(
             "error" => "Internal server error",
             "message" => string(e)
         )))
     end
+
+    elapsed_ms = (time() - start_time) * 1000
+    log_request(req, response, elapsed_ms)
+    return response
 end
 
-function main()
-    @info "Solarius Julia Geostat API starting on port $PORT"
-    @info "Health endpoint ready immediately. GeoStats loads on first API call."
-    HTTP.serve(router, "0.0.0.0", PORT)
-end
-
-main()
+# ---- Start Server ----
+@info "Starting Julia Geostat server on port $PORT..."
+HTTP.serve(router, "0.0.0.0", PORT)

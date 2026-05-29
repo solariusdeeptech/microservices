@@ -32,7 +32,6 @@ jobs:
             timeout: "600"
             concurrency: "10"
             build_machine: E2_HIGHCPU_32
-            startup_timeout: "600"
           - name: python-viz
             path: python-viz
             memory: 4Gi
@@ -42,7 +41,6 @@ jobs:
             timeout: "300"
             concurrency: "20"
             build_machine: E2_HIGHCPU_8
-            startup_timeout: "120"
 
     steps:
       - uses: actions/checkout@v4
@@ -63,18 +61,12 @@ jobs:
             --async \
             --format='value(id)')
           echo "Cloud Build ID: $BUILD_ID"
-          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
-          echo "Polling build status every 30s..."
           while true; do
             STATUS=$(gcloud builds describe "$BUILD_ID" --project ${{ env.GCP_PROJECT_ID }} --format='value(status)' 2>/dev/null || echo "UNKNOWN")
             echo "$(date -u +%H:%M:%S) - Status: $STATUS"
-            if [ "$STATUS" = "SUCCESS" ]; then
-              echo "Build succeeded!"
-              break
-            elif [ "$STATUS" = "FAILURE" ] || [ "$STATUS" = "TIMEOUT" ] || [ "$STATUS" = "CANCELLED" ] || [ "$STATUS" = "EXPIRED" ]; then
-              echo "===== FETCHING BUILD LOGS ====="
-              gcloud builds log "$BUILD_ID" --project ${{ env.GCP_PROJECT_ID }} 2>&1 | tail -100 || echo "Could not fetch logs"
-              echo "===== END BUILD LOGS ====="
+            if [ "$STATUS" = "SUCCESS" ]; then echo "Build succeeded!"; break; fi
+            if [ "$STATUS" = "FAILURE" ] || [ "$STATUS" = "TIMEOUT" ] || [ "$STATUS" = "CANCELLED" ]; then
+              gcloud builds log "$BUILD_ID" --project ${{ env.GCP_PROJECT_ID }} 2>&1 | tail -50 || true
               exit 1
             fi
             sleep 30
@@ -105,19 +97,7 @@ jobs:
             --cpu-boost \
             --no-cpu-throttling \
             --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }},JULIA_NUM_THREADS=4" \
-            --allow-unauthenticated \
-            --update-labels=managed-by=github-actions
-
-      - name: Configure startup probe
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          gcloud run services update ${{ matrix.service.name }} \
-            --region ${{ env.GCP_REGION }} \
-            --startup-probe-http-get-path=/health \
-            --startup-probe-initial-delay=0 \
-            --startup-probe-timeout=3 \
-            --startup-probe-period=10 \
-            --startup-probe-failure-threshold=60
+            --allow-unauthenticated
 
       - name: Get Service URL
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

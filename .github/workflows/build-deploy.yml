@@ -32,6 +32,7 @@ jobs:
             timeout: "600"
             concurrency: "10"
             build_machine: E2_HIGHCPU_32
+            use_service_yaml: "true"
           - name: python-viz
             path: python-viz
             memory: 4Gi
@@ -41,6 +42,7 @@ jobs:
             timeout: "300"
             concurrency: "20"
             build_machine: E2_HIGHCPU_8
+            use_service_yaml: "false"
 
     steps:
       - uses: actions/checkout@v4
@@ -80,8 +82,24 @@ jobs:
             ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:latest \
             --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Deploy to Cloud Run
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Deploy Julia with service.yaml
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.service.use_service_yaml == 'true'
+        run: |
+          IMAGE="${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }}"
+          sed -i "s|IMAGE_PLACEHOLDER|$IMAGE|g" ./${{ matrix.service.path }}/service.yaml
+          sed -i "s|API_KEY_GEOECONOMIX_PLACEHOLDER|${{ secrets.API_KEY_GEOECONOMIX }}|g" ./${{ matrix.service.path }}/service.yaml
+          sed -i "s|API_KEY_GEOMATRIX_PLACEHOLDER|${{ secrets.API_KEY_GEOMATRIX }}|g" ./${{ matrix.service.path }}/service.yaml
+          sed -i "s|API_KEY_TERRAEXPLORATION_PLACEHOLDER|${{ secrets.API_KEY_TERRAEXPLORATION }}|g" ./${{ matrix.service.path }}/service.yaml
+          gcloud run services replace ./${{ matrix.service.path }}/service.yaml \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+          gcloud run services set-iam-policy ${{ matrix.service.name }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }} \
+            <(echo '{"bindings":[{"role":"roles/run.invoker","members":["allUsers"]}]}')
+
+      - name: Deploy Python with gcloud run deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.service.use_service_yaml == 'false'
         run: |
           gcloud run deploy ${{ matrix.service.name }} \
             --image ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \

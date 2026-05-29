@@ -13,9 +13,9 @@ using Dates
 @info "Phase 1: HTTP+JSON3 loaded, starting server..."
 
 # Include lightweight middleware
-include("middleware/cors.jl")
-include("middleware/auth.jl")
-include("middleware/logging.jl")
+include(joinpath(@__DIR__, "middleware/cors.jl"))
+include(joinpath(@__DIR__, "middleware/auth.jl"))
+include(joinpath(@__DIR__, "middleware/logging.jl"))
 
 # Port configuration
 const PORT = parse(Int, get(ENV, "PORT", "8080"))
@@ -65,17 +65,17 @@ function load_geostats_background()
     @info "Phase 2: Loading GeoStats packages in background..."
     t0 = time()
     try
-        include("routes/variography.jl")
+        include(joinpath(@__DIR__, "routes/variography.jl"))
         @info "  ✓ variography loaded ($(round(time()-t0, digits=1))s)"
-        include("routes/kriging.jl")
+        include(joinpath(@__DIR__, "routes/kriging.jl"))
         @info "  ✓ kriging loaded ($(round(time()-t0, digits=1))s)"
-        include("routes/sgs.jl")
+        include(joinpath(@__DIR__, "routes/sgs.jl"))
         @info "  ✓ sgs loaded ($(round(time()-t0, digits=1))s)"
-        include("routes/montecarlo.jl")
+        include(joinpath(@__DIR__, "routes/montecarlo.jl"))
         @info "  ✓ montecarlo loaded ($(round(time()-t0, digits=1))s)"
-        include("routes/pit_optimize.jl")
+        include(joinpath(@__DIR__, "routes/pit_optimize.jl"))
         @info "  ✓ pit_optimize loaded ($(round(time()-t0, digits=1))s)"
-        include("routes/block_model.jl")
+        include(joinpath(@__DIR__, "routes/block_model.jl"))
         @info "  ✓ block_model loaded ($(round(time()-t0, digits=1))s)"
 
         GEOSTATS_READY[] = true

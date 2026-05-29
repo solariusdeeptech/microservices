@@ -23,16 +23,15 @@ jobs:
       max-parallel: 1
       matrix:
         service:
-          - name: julia-geostat
-            path: julia-geostat
-            memory: 8Gi
-            cpu: "4"
-            min_instances: "1"
+          - name: python-geostat
+            path: python-geostat
+            memory: 4Gi
+            cpu: "2"
+            min_instances: "0"
             max_instances: "5"
             timeout: "600"
             concurrency: "10"
-            build_machine: E2_HIGHCPU_32
-            use_service_yaml: "true"
+            build_machine: E2_HIGHCPU_8
           - name: python-viz
             path: python-viz
             memory: 4Gi
@@ -42,7 +41,6 @@ jobs:
             timeout: "300"
             concurrency: "20"
             build_machine: E2_HIGHCPU_8
-            use_service_yaml: "false"
 
     steps:
       - uses: actions/checkout@v4
@@ -82,24 +80,8 @@ jobs:
             ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:latest \
             --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Deploy Julia with service.yaml
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.service.use_service_yaml == 'true'
-        run: |
-          IMAGE="${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }}"
-          sed -i "s|IMAGE_PLACEHOLDER|$IMAGE|g" ./${{ matrix.service.path }}/service.yaml
-          sed -i "s|API_KEY_GEOECONOMIX_PLACEHOLDER|${{ secrets.API_KEY_GEOECONOMIX }}|g" ./${{ matrix.service.path }}/service.yaml
-          sed -i "s|API_KEY_GEOMATRIX_PLACEHOLDER|${{ secrets.API_KEY_GEOMATRIX }}|g" ./${{ matrix.service.path }}/service.yaml
-          sed -i "s|API_KEY_TERRAEXPLORATION_PLACEHOLDER|${{ secrets.API_KEY_TERRAEXPLORATION }}|g" ./${{ matrix.service.path }}/service.yaml
-          gcloud run services replace ./${{ matrix.service.path }}/service.yaml \
-            --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }}
-          gcloud run services set-iam-policy ${{ matrix.service.name }} \
-            --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }} \
-            <(echo '{"bindings":[{"role":"roles/run.invoker","members":["allUsers"]}]}')
-
-      - name: Deploy Python with gcloud run deploy
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.service.use_service_yaml == 'false'
+      - name: Deploy to Cloud Run
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           gcloud run deploy ${{ matrix.service.name }} \
             --image ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \
@@ -114,7 +96,7 @@ jobs:
             --concurrency ${{ matrix.service.concurrency }} \
             --cpu-boost \
             --no-cpu-throttling \
-            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }},JULIA_NUM_THREADS=4" \
+            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }}" \
             --allow-unauthenticated
 
       - name: Get Service URL

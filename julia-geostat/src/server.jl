@@ -1,26 +1,29 @@
 #!/usr/bin/env julia
 """
 Solarius Microservices — Julia Geostat API Server
-Lazy-loading architecture: starts HTTP server immediately,
-loads GeoStats packages on first actual API request.
+Two-phase startup: HTTP server starts first, GeoStats loads in background.
 """
 
+# Phase 1: Load lightweight packages (precompiled = fast)
 using HTTP
 using JSON3
 using Logging
 using Dates
 
-# Include lightweight middleware only
+@info "Phase 1: HTTP+JSON3 loaded, starting server..."
+
+# Include lightweight middleware
 include("middleware/cors.jl")
 include("middleware/auth.jl")
 include("middleware/logging.jl")
 
-# Cloud Run sets PORT env var
-const PORT = parse(Int, get(ENV, "PORT", get(ENV, "JULIA_PORT", "8080")))
+# Port configuration
+const PORT = parse(Int, get(ENV, "PORT", "8080"))
 
-# Lazy loading state
-const ROUTES_LOADED = Ref(false)
-const LOADING_IN_PROGRESS = Ref(false)
+# State tracking for GeoStats loading
+const GEOSTATS_READY = Ref(false)
+const GEOSTATS_LOADING = Ref(false)
+const GEOSTATS_ERROR = Ref{Union{Nothing,String}}(nothing)
 
 function json_headers()
     return [
@@ -30,15 +33,25 @@ function json_headers()
     ]
 end
 
-# Health endpoint — works immediately, no GeoStats needed
-function handle_health_inline(req::HTTP.Request)
+# Health endpoint — always works
+function handle_health(req::HTTP.Request)
+    status_str = if GEOSTATS_READY[]
+        "healthy"
+    elseif GEOSTATS_LOADING[]
+        "warming_up"
+    elseif GEOSTATS_ERROR[] !== nothing
+        "degraded"
+    else
+        "starting"
+    end
+
     return HTTP.Response(200, json_headers(), JSON3.write(Dict(
-        "status" => ROUTES_LOADED[] ? "healthy" : "warming_up",
+        "status" => status_str,
         "service" => "julia-geostat",
         "version" => "1.0.0",
         "julia_version" => string(VERSION),
         "timestamp" => string(now()),
-        "ready" => ROUTES_LOADED[],
+        "ready" => GEOSTATS_READY[],
         "capabilities" => [
             "variography", "kriging", "sgs",
             "montecarlo", "pit_optimization", "block_model_estimation"
@@ -46,43 +59,37 @@ function handle_health_inline(req::HTTP.Request)
     )))
 end
 
-# Load heavy route modules on demand
-function ensure_routes_loaded()
-    if ROUTES_LOADED[]
-        return true
-    end
-    if LOADING_IN_PROGRESS[]
-        return false
-    end
-    LOADING_IN_PROGRESS[] = true
-    @info "Loading GeoStats packages (first API request)..."
+# Background GeoStats loader
+function load_geostats_background()
+    GEOSTATS_LOADING[] = true
+    @info "Phase 2: Loading GeoStats packages in background..."
+    t0 = time()
     try
         include("routes/variography.jl")
-        @info "  variography loaded"
+        @info "  ✓ variography loaded ($(round(time()-t0, digits=1))s)"
         include("routes/kriging.jl")
-        @info "  kriging loaded"
+        @info "  ✓ kriging loaded ($(round(time()-t0, digits=1))s)"
         include("routes/sgs.jl")
-        @info "  sgs loaded"
+        @info "  ✓ sgs loaded ($(round(time()-t0, digits=1))s)"
         include("routes/montecarlo.jl")
-        @info "  montecarlo loaded"
+        @info "  ✓ montecarlo loaded ($(round(time()-t0, digits=1))s)"
         include("routes/pit_optimize.jl")
-        @info "  pit_optimize loaded"
+        @info "  ✓ pit_optimize loaded ($(round(time()-t0, digits=1))s)"
         include("routes/block_model.jl")
-        @info "  block_model loaded"
-        ROUTES_LOADED[] = true
-        LOADING_IN_PROGRESS[] = false
-        @info "All GeoStats packages loaded successfully"
-        return true
+        @info "  ✓ block_model loaded ($(round(time()-t0, digits=1))s)"
+
+        GEOSTATS_READY[] = true
+        GEOSTATS_LOADING[] = false
+        elapsed = round(time() - t0, digits=1)
+        @info "Phase 2 complete: All GeoStats packages loaded in $(elapsed)s"
     catch e
-        LOADING_IN_PROGRESS[] = false
+        GEOSTATS_LOADING[] = false
+        GEOSTATS_ERROR[] = string(e)
         @error "Failed to load GeoStats packages" exception=(e, catch_backtrace())
-        return false
     end
 end
 
-"""
-Router principal
-"""
+# Router
 function router(req::HTTP.Request)
     # CORS preflight
     if req.method == "OPTIONS"
@@ -91,22 +98,29 @@ function router(req::HTTP.Request)
 
     path = HTTP.URI(req.target).path
 
-    # Health check — always works, no GeoStats needed
+    # Health check — always works
     if path == "/health" && req.method == "GET"
-        return handle_health_inline(req)
+        return handle_health(req)
     end
 
-    # Authenticate
+    # Auth check
     auth_result = authenticate(req)
     if auth_result !== nothing
         return auth_result
     end
 
-    # Lazy load GeoStats on first real request
-    if !ensure_routes_loaded()
+    # Check if GeoStats is ready
+    if !GEOSTATS_READY[]
+        status_msg = if GEOSTATS_LOADING[]
+            "GeoStats packages are still loading, please retry in 30 seconds"
+        elseif GEOSTATS_ERROR[] !== nothing
+            "GeoStats packages failed to load: $(GEOSTATS_ERROR[])"
+        else
+            "Service is initializing, please retry in 10 seconds"
+        end
         return HTTP.Response(503, json_headers(), JSON3.write(Dict(
-            "error" => "Service is loading GeoStats packages, please retry in 30 seconds",
-            "retry_after" => 30
+            "error" => status_msg,
+            "retry_after" => GEOSTATS_LOADING[] ? 30 : 10
         )))
     end
 
@@ -130,7 +144,7 @@ function router(req::HTTP.Request)
             )))
         end
     catch e
-        @error "Unhandled error" exception=(e, catch_backtrace())
+        @error "Request error" path=path exception=(e, catch_backtrace())
         return HTTP.Response(500, json_headers(), JSON3.write(Dict(
             "error" => "Internal server error",
             "message" => string(e)
@@ -139,8 +153,13 @@ function router(req::HTTP.Request)
 end
 
 function main()
-    @info "Solarius Julia Geostat API starting on port $PORT"
-    @info "Health endpoint ready immediately. GeoStats loads on first API call."
+    @info "Solarius Julia Geostat API — starting on port $PORT"
+
+    # Start GeoStats loading in background BEFORE starting HTTP server
+    # Use @async so it runs concurrently with the server
+    @async load_geostats_background()
+
+    @info "HTTP server starting on 0.0.0.0:$PORT — health check ready immediately"
     HTTP.serve(router, "0.0.0.0", PORT)
 end
 

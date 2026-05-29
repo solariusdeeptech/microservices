@@ -293,19 +293,29 @@ async def ml_domaining(request: Request):
         
         # Composite data (required for clustering)
         composites_raw = body.get('composites', [])
-        if not composites_raw and action != 'auto_k':
+        if not composites_raw:
             return JSONResponse({'error': 'composites array required'}, status_code=400)
         
         # Block data (optional, for envelope assignment)
         blocks_raw = body.get('blocks', [])
         
-        # Feature configuration
-        feature_config = body.get('features', {})
-        use_grade = feature_config.get('use_grade', True)
-        use_coordinates = feature_config.get('use_coordinates', True)
-        spatial_weight = feature_config.get('spatial_weight', 0.5)  # 0=pure geochemical, 1=pure spatial
-        extra_attributes = feature_config.get('extra_attributes', [])  # e.g. ['cu', 'ag', 'fe']
-        grade_weight = feature_config.get('grade_weight', 1.0)
+        # Feature configuration — handle both list format ["grade","x","y","z"] and dict format
+        feature_config_raw = body.get('features', {})
+        if isinstance(feature_config_raw, list):
+            # List format from TypeScript UI: ['grade', 'x', 'y', 'z', 'cu', ...]
+            feature_list = [f.lower() for f in feature_config_raw]
+            use_grade = 'grade' in feature_list or 'au' in feature_list
+            use_coordinates = any(c in feature_list for c in ['x', 'y', 'z'])
+            spatial_weight = body.get('spatial_weight', 0.5)
+            extra_attributes = [f for f in feature_list if f not in ('grade', 'au', 'x', 'y', 'z')]
+            grade_weight = 1.0
+        else:
+            feature_config = feature_config_raw if isinstance(feature_config_raw, dict) else {}
+            use_grade = feature_config.get('use_grade', True)
+            use_coordinates = feature_config.get('use_coordinates', True)
+            spatial_weight = feature_config.get('spatial_weight', 0.5)
+            extra_attributes = feature_config.get('extra_attributes', [])
+            grade_weight = feature_config.get('grade_weight', 1.0)
         
         # Algorithm configuration
         algorithm = body.get('algorithm', 'kmeans')  # kmeans, hdbscan, gmm, spectral

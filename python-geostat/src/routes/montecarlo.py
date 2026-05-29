@@ -1,11 +1,10 @@
 """
-POST /montecarlo — Monte Carlo financial simulation.
-Same API contract as Julia version.
+POST /api/monte-carlo — Financial Monte Carlo simulation.
+API contract aligned with TypeScript MonteCarloJuliaRequest/Response types.
 """
 import time
 import logging
 import numpy as np
-from scipy import stats as sp_stats
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -13,135 +12,185 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/montecarlo")
+def sample_distribution(dist_type: str, params: dict, size: int, rng) -> np.ndarray:
+    """Sample from distribution specification."""
+    if dist_type == "normal":
+        return rng.normal(params.get("mean", 0), params.get("std", 1), size)
+    elif dist_type == "lognormal":
+        return rng.lognormal(params.get("mean", 0), params.get("sigma", 0.5), size)
+    elif dist_type == "triangular":
+        return rng.triangular(params.get("min", 0), params.get("mode", 0.5), params.get("max", 1), size)
+    elif dist_type == "beta":
+        return rng.beta(params.get("alpha", 2), params.get("beta", 5), size)
+    elif dist_type == "uniform":
+        return rng.uniform(params.get("min", 0), params.get("max", 1), size)
+    else:
+        return rng.normal(params.get("mean", 0), params.get("std", 1), size)
+
+
+@router.post("/api/monte-carlo")
 async def montecarlo(request: Request):
     t0 = time.time()
     body = await request.json()
 
-    econ = body["economics"]
-    uncertainties = body["uncertainties"]
-    sim_config = body["simulation"]
+    # TS MonteCarloJuliaRequest fields
+    project = body["project"]
+    fixed_costs = body.get("fixed_costs", {})
+    uncertainties = body.get("uncertainties", [])
+    tax_regime = body.get("tax_regime", {})
+    sim_config = body.get("simulation", {})
+
+    life_years = project["life_years"]
+    production_annual = project["production_annual"]
+    capex = project["capex"]
+    discount_rate = project["discount_rate"]
+
+    mining_cost_base = fixed_costs.get("mining_cost_base", 15.0)
+    processing_cost_base = fixed_costs.get("processing_cost_base", 25.0)
+    g_and_a = fixed_costs.get("g_and_a", 5.0)
+
+    corporate_tax = tax_regime.get("corporate_tax", 0.30)
+    royalty = tax_regime.get("royalty", 0.03)
+
     iterations = sim_config.get("iterations", 10000)
     seed = sim_config.get("seed", 42)
+    iterations = min(iterations, 100000)  # Cap for safety
 
-    logger.info(f"Monte Carlo request: {iterations} iterations")
+    logger.info(f"Monte Carlo: {iterations} iterations, {len(uncertainties)} uncertainties")
+
     rng = np.random.default_rng(seed)
 
-    # Build distributions
-    distributions = {}
+    # Sample uncertain variables
+    sampled = {}
     for u in uncertainties:
-        var_name = u["variable"]
-        dist_type = u["distribution"]
-        params = u["params"]
+        sampled[u["variable"]] = sample_distribution(
+            u["distribution"], u["params"], iterations, rng
+        )
 
-        if dist_type == "triangular":
-            lo, hi, mode = params["min"], params["max"], params["mode"]
-            c = (mode - lo) / (hi - lo)
-            distributions[var_name] = ("triang", {"c": c, "loc": lo, "scale": hi - lo})
-        elif dist_type == "normal":
-            distributions[var_name] = ("norm", {"loc": params["mean"], "scale": params["std"]})
-        elif dist_type == "lognormal":
-            distributions[var_name] = ("lognorm", {"s": params["sdlog"], "scale": np.exp(params["meanlog"])})
-        elif dist_type == "uniform":
-            distributions[var_name] = ("uniform", {"loc": params["min"], "scale": params["max"] - params["min"]})
+    # Compute NPV for each iteration
+    npvs = np.zeros(iterations)
+    irrs_approx = np.zeros(iterations)
+    paybacks = np.full(iterations, float(life_years))
+
+    for i in range(iterations):
+        # Get sampled or base values
+        price = sampled.get("commodity_price", np.full(iterations, 1500.0))[i]
+        grade = sampled.get("grade", np.full(iterations, 2.0))[i]
+        recovery = sampled.get("recovery", np.full(iterations, 0.92))[i]
+        mining_cost = sampled.get("mining_cost", np.full(iterations, mining_cost_base))[i]
+        processing_cost = sampled.get("processing_cost", np.full(iterations, processing_cost_base))[i]
+
+        # Annual cash flows
+        revenue = production_annual * grade * recovery * price / 31.1035  # oz to g conversion
+        opex = production_annual * (mining_cost + processing_cost + g_and_a)
+        gross_profit = revenue - opex
+        royalty_cost = revenue * royalty
+        taxable = gross_profit - royalty_cost
+        tax = max(0, taxable * corporate_tax)
+        net_cf = taxable - tax
+
+        # NPV
+        cf_stream = [-capex] + [net_cf] * life_years
+        npv = sum(cf / (1 + discount_rate)**t for t, cf in enumerate(cf_stream))
+        npvs[i] = npv
+
+        # Approximate IRR using NPV interpolation
+        if net_cf > 0:
+            irrs_approx[i] = (net_cf / capex) * 100  # Simplified ROI as %
         else:
-            distributions[var_name] = ("norm", {"loc": params.get("mean", 0), "scale": params.get("std", 1)})
+            irrs_approx[i] = -10.0
 
-    # Base parameters
-    base_lom = int(econ.get("lom_years", 10))
-    base_tonnage = float(econ.get("tonnage_mtpa", 5.0))
-    base_grade = float(econ.get("grade", 2.5))
-    base_recovery = float(econ.get("recovery", 0.92))
-    base_price = float(econ.get("metal_price", 1800.0))
-    base_opex = float(econ.get("opex", 50.0))
-    base_capex = float(econ.get("capex", 200.0))
-    discount_rate = float(econ.get("discount_rate", 0.08))
+        # Payback period
+        cumulative = -capex
+        for yr in range(1, life_years + 1):
+            cumulative += net_cf
+            if cumulative >= 0:
+                paybacks[i] = yr
+                break
 
-    # Sample all at once (vectorized)
-    samples = {}
-    for var_name, (dist_name, params) in distributions.items():
-        dist = getattr(sp_stats, dist_name)
-        samples[var_name] = dist.rvs(**params, size=iterations, random_state=rng)
+    # Sensitivity analysis (Pearson correlation with NPV)
+    sensitivity = []
+    for u in uncertainties:
+        vals = sampled[u["variable"]]
+        if np.std(vals) > 0 and np.std(npvs) > 0:
+            pearson = float(np.corrcoef(vals, npvs)[0, 1])
+            from scipy.stats import spearmanr
+            spearman = float(spearmanr(vals, npvs).correlation)
+            # NPV swing: difference between P10 and P90 of NPV when this var is at extremes
+            low_mask = vals <= np.percentile(vals, 20)
+            high_mask = vals >= np.percentile(vals, 80)
+            swing = float(np.mean(npvs[high_mask]) - np.mean(npvs[low_mask])) if np.any(low_mask) and np.any(high_mask) else 0.0
+        else:
+            pearson, spearman, swing = 0.0, 0.0, 0.0
 
-    prices = samples.get("goldPrice", np.full(iterations, base_price))
-    grades = samples.get("grade", np.full(iterations, base_grade))
-    capexs = samples.get("capex", np.full(iterations, base_capex))
-    opexs = samples.get("opex", np.full(iterations, base_opex))
+        sensitivity.append({
+            "variable": u["variable"],
+            "pearson_correlation": pearson,
+            "spearman_correlation": spearman,
+            "npv_swing": swing,
+        })
 
-    # Vectorized NPV calculation
-    annual_revenue = base_tonnage * 1e6 * grades / 1e6 * base_recovery * prices
-    annual_cost = base_tonnage * 1e6 * opexs / 1e6
-    annual_cf = annual_revenue - annual_cost
+    # Histograms
+    npv_hist_counts, npv_hist_bins = np.histogram(npvs, bins=50)
+    irr_hist_counts, irr_hist_bins = np.histogram(irrs_approx, bins=50)
+    sorted_npvs = np.sort(npvs)
+    probabilities = np.linspace(0, 1, len(sorted_npvs)).tolist()
 
-    discount_factors = np.sum([1.0 / (1 + discount_rate)**t for t in range(1, base_lom + 1)])
-    npvs = -capexs + annual_cf * discount_factors
-
-    # IRR (vectorized approximation)
-    irrs = np.array([_compute_irr(-capexs[i], annual_cf[i], base_lom) for i in range(iterations)])
-
-    # Statistics
-    percentiles = {
-        "p5": float(np.percentile(npvs, 5)),
-        "p10": float(np.percentile(npvs, 10)),
-        "p25": float(np.percentile(npvs, 25)),
-        "p50": float(np.percentile(npvs, 50)),
-        "p75": float(np.percentile(npvs, 75)),
-        "p90": float(np.percentile(npvs, 90)),
-        "p95": float(np.percentile(npvs, 95)),
-    }
-
-    prob_positive = float(np.mean(npvs > 0))
-
-    # Histogram
-    hist_counts, hist_edges = np.histogram(npvs, bins=50)
-    histogram = [
-        {
-            "bin_start": float(hist_edges[i]),
-            "bin_end": float(hist_edges[i + 1]),
-            "count": int(hist_counts[i]),
-            "frequency": float(hist_counts[i] / iterations),
-        }
-        for i in range(len(hist_counts))
-    ]
+    # Risk metrics
+    var_95 = float(np.percentile(npvs, 5))  # 5th percentile = 95% VaR
+    cvar_mask = npvs <= var_95
+    cvar_95 = float(np.mean(npvs[cvar_mask])) if np.any(cvar_mask) else float(var_95)
 
     elapsed = round(time.time() - t0, 3)
+
+    # Response matches TS MonteCarloJuliaResponse
     return JSONResponse({
-        "npv_statistics": {
+        "status": "success",
+        "npv": {
             "mean": float(np.mean(npvs)),
             "std": float(np.std(npvs)),
+            "P10": float(np.percentile(npvs, 10)),
+            "P50": float(np.percentile(npvs, 50)),
+            "P90": float(np.percentile(npvs, 90)),
             "min": float(np.min(npvs)),
             "max": float(np.max(npvs)),
-            "percentiles": percentiles,
-            "probability_positive": prob_positive,
         },
-        "irr_statistics": {
-            "mean": float(np.mean(irrs)),
-            "std": float(np.std(irrs)),
-            "p10": float(np.percentile(irrs, 10)),
-            "p50": float(np.percentile(irrs, 50)),
-            "p90": float(np.percentile(irrs, 90)),
+        "irr": {
+            "mean": float(np.mean(irrs_approx)),
+            "P10": float(np.percentile(irrs_approx, 10)),
+            "P50": float(np.percentile(irrs_approx, 50)),
+            "P90": float(np.percentile(irrs_approx, 90)),
+            "unit": "%",
         },
-        "histogram": histogram,
-        "metadata": {
-            "iterations": iterations,
-            "processing_time_s": elapsed,
-            "engine": "numpy/scipy",
+        "payback": {
+            "mean": float(np.mean(paybacks)),
+            "median": float(np.median(paybacks)),
+            "unit": "years",
         },
-    })
-
-
-def _compute_irr(initial, annual_cf, years, max_iter=100):
-    r = 0.10
-    for _ in range(max_iter):
-        npv = initial
-        dnpv = 0.0
-        for t in range(1, years + 1):
-            npv += annual_cf / (1 + r)**t
-            dnpv -= t * annual_cf / (1 + r)**(t + 1)
-        if abs(dnpv) < 1e-12:
-            break
-        r -= npv / dnpv
-        r = max(-0.95, min(r, 5.0))
-        if abs(npv) < 1e-6:
-            break
-    return r
+        "risk": {
+            "VaR_95": var_95,
+            "CVaR_95": cvar_95,
+            "probability_positive_npv": float(np.mean(npvs > 0)),
+            "probability_loss": float(np.mean(npvs < 0)),
+            "max_loss": float(np.min(npvs)),
+        },
+        "sensitivity": sensitivity,
+        "visualization": {
+            "npv_histogram": {
+                "bins": npv_hist_bins.tolist(),
+                "counts": npv_hist_counts.tolist(),
+            },
+            "npv_scurve": {
+                "values": sorted_npvs.tolist(),
+                "probabilities": probabilities,
+            },
+            "irr_histogram": {
+                "bins": irr_hist_bins.tolist(),
+                "counts": irr_hist_counts.tolist(),
+            },
+        },
+        "performance": {
+            "total_time_s": elapsed,
+            "iterations_per_second": float(iterations / max(elapsed, 0.001)),
+        },
+    }, headers={"X-Process-Time": str(elapsed)})

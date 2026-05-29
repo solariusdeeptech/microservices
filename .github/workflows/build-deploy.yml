@@ -51,13 +51,29 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Build with Cloud Build and Push to Artifact Registry
+      - name: Build with Cloud Build (async + poll)
         run: |
-          gcloud builds submit ./${{ matrix.service.path }} \
+          BUILD_ID=$(gcloud builds submit ./${{ matrix.service.path }} \
             --tag ${{ env.ARTIFACT_REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }} \
             --machine-type ${{ matrix.service.build_machine }} \
             --timeout 3600 \
-            --project ${{ env.GCP_PROJECT_ID }}
+            --project ${{ env.GCP_PROJECT_ID }} \
+            --async \
+            --format='value(id)')
+          echo "Cloud Build ID: $BUILD_ID"
+          echo "Polling build status every 30s..."
+          while true; do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --project ${{ env.GCP_PROJECT_ID }} --format='value(status)' 2>/dev/null || echo "UNKNOWN")
+            echo "$(date -u +%H:%M:%S) - Status: $STATUS"
+            if [ "$STATUS" = "SUCCESS" ]; then
+              echo "Build succeeded!"
+              break
+            elif [ "$STATUS" = "FAILURE" ] || [ "$STATUS" = "TIMEOUT" ] || [ "$STATUS" = "CANCELLED" ] || [ "$STATUS" = "EXPIRED" ]; then
+              echo "Build failed with status: $STATUS"
+              exit 1
+            fi
+            sleep 30
+          done
 
       - name: Tag as latest
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

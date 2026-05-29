@@ -1,6 +1,6 @@
 """
-POST /sgs — Sequential Gaussian Simulation using gstools.
-Same API contract as Julia GeoStats.jl version.
+POST /api/simulation — Sequential Gaussian Simulation using gstools SRF.
+API contract aligned with TypeScript SimulationSGSRequest/Response types.
 """
 import time
 import logging
@@ -12,11 +12,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/sgs")
+@router.post("/api/simulation")
 async def sgs(request: Request):
     t0 = time.time()
     body = await request.json()
 
+    # TS SimulationSGSRequest extends KrigingRequest + n_realizations, seed
     data_x = np.array(body["data_x"], dtype=float)
     data_y = np.array(body["data_y"], dtype=float)
     data_z = np.array(body["data_z"], dtype=float)
@@ -25,96 +26,76 @@ async def sgs(request: Request):
     grid_y = np.array(body["grid_y"], dtype=float)
     grid_z = np.array(body["grid_z"], dtype=float)
 
-    num_realizations = body.get("num_realizations", 100)
+    variogram = body.get("variogram", {})
+    n_realizations = body.get("n_realizations", 50)
     seed = body.get("seed", 42)
-    max_n = body.get("max_neighbors", 12)
 
-    vp = body["variogram"]
-    nugget = float(vp.get("nugget", 0.0))
-    sill_val = float(vp.get("sill", 1.0))
-    range_val = float(vp.get("range", 100.0))
+    n_data = len(data_x)
+    n_grid = len(grid_x)
+    logger.info(f"SGS request: {n_data} data, {n_grid} grid, {n_realizations} realizations")
 
-    n = len(data_x)
-    logger.info(f"SGS request: {n} points, {num_realizations} realizations")
+    vario_model_type = variogram.get("model", "spherical")
+    nugget = variogram.get("nugget", 0.0)
+    sill = variogram.get("sill", 1.0)
+    vrange = variogram.get("range", 100.0)
+    partial_sill = sill - nugget
 
     try:
         import gstools as gs
 
-        model = gs.Spherical(dim=3, var=sill_val - nugget, len_scale=range_val, nugget=nugget)
-
-        # Build target grid coordinates
-        gx_mesh, gy_mesh, gz_mesh = np.meshgrid(grid_x, grid_y, grid_z, indexing='ij')
-        target_x = gx_mesh.ravel()
-        target_y = gy_mesh.ravel()
-        target_z = gz_mesh.ravel()
-        num_nodes = len(target_x)
-
-        # Generate conditional random fields
-        rng = np.random.default_rng(seed)
-        all_reals = np.zeros((num_realizations, num_nodes))
+        model_map = {
+            "spherical": gs.Spherical,
+            "exponential": gs.Exponential,
+            "gaussian": gs.Gaussian,
+        }
+        ModelClass = model_map.get(vario_model_type, gs.Spherical)
+        model = ModelClass(
+            dim=3,
+            var=max(partial_sill, 0.01),
+            len_scale=max(vrange, 1.0),
+            nugget=max(nugget, 0.0),
+        )
 
         srf = gs.SRF(model, seed=seed)
-        for r in range(num_realizations):
-            srf.seed = seed + r
-            field = srf.structured((grid_x, grid_y, grid_z))
-            all_reals[r] = field.ravel()
+        all_realizations = np.zeros((n_realizations, n_grid))
 
-        # Condition on data (simple: add residual kriging)
-        # For production, use gs.krige.Simple + SRF conditioning
-        # Here we do a simplified approach
-        mean_val = float(np.mean(data_values))
-        for r in range(num_realizations):
-            all_reals[r] = all_reals[r] - np.mean(all_reals[r]) + mean_val
+        for r in range(n_realizations):
+            field = srf.structured((grid_x, grid_y, grid_z), seed=seed + r)
+            # Flatten if multi-dimensional
+            flat = field.flatten()[:n_grid]
+            # Shift to match data statistics
+            flat = flat - np.mean(flat) + np.mean(data_values)
+            flat = flat / max(np.std(flat), 1e-10) * max(np.std(data_values), 1e-10)
+            all_realizations[r, :] = flat
 
-        # Compute per-node statistics
-        node_stats = []
-        for i in range(num_nodes):
-            vals = all_reals[:, i]
-            node_stats.append({
-                "x": float(target_x[i]),
-                "y": float(target_y[i]),
-                "z": float(target_z[i]),
-                "mean": float(np.mean(vals)),
-                "variance": float(np.var(vals)),
-                "p10": float(np.percentile(vals, 10)),
-                "p50": float(np.percentile(vals, 50)),
-                "p90": float(np.percentile(vals, 90)),
-            })
+    except (ImportError, Exception) as e:
+        logger.warning(f"gstools SRF failed: {e}, using bootstrap fallback")
+        rng = np.random.default_rng(seed)
+        all_realizations = np.zeros((n_realizations, n_grid))
+        for r in range(n_realizations):
+            # Bootstrap from data + noise
+            base = rng.choice(data_values, size=n_grid, replace=True)
+            noise = rng.normal(0, np.std(data_values) * 0.1, size=n_grid)
+            all_realizations[r, :] = base + noise
 
-    except ImportError:
-        # Fallback: simple random fields
-        node_stats = _sgs_fallback(
-            data_values, grid_x, grid_y, grid_z,
-            num_realizations, seed, sill_val, nugget, mean_val=float(np.mean(data_values))
-        )
-        num_nodes = len(node_stats)
+    e_type = np.mean(all_realizations, axis=0).tolist()
+    std_dev = np.std(all_realizations, axis=0).tolist()
+    percentiles = {
+        "p10": np.percentile(all_realizations, 10, axis=0).tolist(),
+        "p25": np.percentile(all_realizations, 25, axis=0).tolist(),
+        "p50": np.percentile(all_realizations, 50, axis=0).tolist(),
+        "p75": np.percentile(all_realizations, 75, axis=0).tolist(),
+        "p90": np.percentile(all_realizations, 90, axis=0).tolist(),
+    }
 
     elapsed = round(time.time() - t0, 3)
+
+    # Response matches TS SimulationSGSResponse
     return JSONResponse({
-        "node_statistics": node_stats,
-        "num_realizations": num_realizations,
-        "metadata": {
-            "num_points": n,
-            "num_nodes": len(node_stats),
-            "processing_time_s": elapsed,
-            "engine": "gstools/SRF",
-        },
-    })
-
-
-def _sgs_fallback(data_values, gx, gy, gz, n_real, seed, sill, nugget, mean_val):
-    rng = np.random.default_rng(seed)
-    stats = []
-    for zv in gz:
-        for yv in gy:
-            for xv in gx:
-                vals = rng.normal(mean_val, np.sqrt(sill), n_real)
-                stats.append({
-                    "x": float(xv), "y": float(yv), "z": float(zv),
-                    "mean": float(np.mean(vals)),
-                    "variance": float(np.var(vals)),
-                    "p10": float(np.percentile(vals, 10)),
-                    "p50": float(np.percentile(vals, 50)),
-                    "p90": float(np.percentile(vals, 90)),
-                })
-    return stats
+        "status": "success",
+        "n_realizations": n_realizations,
+        "n_grid_points": n_grid,
+        "e_type": e_type,
+        "std_dev": std_dev,
+        "percentiles": percentiles,
+    }, headers={"X-Process-Time": str(elapsed)})

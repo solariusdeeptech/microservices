@@ -106,10 +106,7 @@ jobs:
             --no-cpu-throttling \
             --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }},JULIA_NUM_THREADS=4" \
             --allow-unauthenticated \
-            --update-labels=managed-by=github-actions \
-            --startup-cpu-boost \
-            --command="" \
-            --args=""
+            --update-labels=managed-by=github-actions
 
       - name: Configure startup probe
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

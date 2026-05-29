@@ -61,6 +61,7 @@ jobs:
             --async \
             --format='value(id)')
           echo "Cloud Build ID: $BUILD_ID"
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
           echo "Polling build status every 30s..."
           while true; do
             STATUS=$(gcloud builds describe "$BUILD_ID" --project ${{ env.GCP_PROJECT_ID }} --format='value(status)' 2>/dev/null || echo "UNKNOWN")
@@ -69,7 +70,9 @@ jobs:
               echo "Build succeeded!"
               break
             elif [ "$STATUS" = "FAILURE" ] || [ "$STATUS" = "TIMEOUT" ] || [ "$STATUS" = "CANCELLED" ] || [ "$STATUS" = "EXPIRED" ]; then
-              echo "Build failed with status: $STATUS"
+              echo "===== FETCHING BUILD LOGS ====="
+              gcloud builds log "$BUILD_ID" --project ${{ env.GCP_PROJECT_ID }} 2>&1 | tail -100 || echo "Could not fetch logs"
+              echo "===== END BUILD LOGS ====="
               exit 1
             fi
             sleep 30

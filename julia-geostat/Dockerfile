@@ -1,6 +1,7 @@
 FROM julia:1.10-bookworm AS builder
 WORKDIR /app
-RUN julia -e 'using Pkg; Pkg.activate("."); Pkg.add(["HTTP", "JSON3", "GeoStats", "Meshes", "GeoTables", "Distributions"])'
+ENV JULIA_PKG_PRECOMPILE_AUTO=0
+RUN julia -e 'using Pkg; Pkg.activate("."); Pkg.add(["HTTP", "JSON3", "GeoStats", "Meshes", "GeoTables", "Distributions"]); Pkg.resolve()'
 COPY src/ src/
 FROM julia:1.10-bookworm
 WORKDIR /app

@@ -21,6 +21,7 @@ from src.routes.montecarlo import router as montecarlo_router
 from src.routes.pit_optimize import router as pit_router
 from src.routes.block_model import router as block_model_router
 from src.routes.ml_domaining import router as ml_domaining_router
+from src.routes.geodriver import geodriver_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -58,7 +59,8 @@ async def health():
         "capabilities": [
             "variography", "kriging", "sgs",
             "montecarlo", "pit_optimization", "block_model_estimation",
-            "ml_domaining"
+            "ml_domaining",
+            "spatial_continuity", "hybrid_clustering", "envelope_geometry"
         ]
     }
 
@@ -70,5 +72,6 @@ app.include_router(montecarlo_router)
 app.include_router(pit_router)
 app.include_router(block_model_router)
 app.include_router(ml_domaining_router)
+app.include_router(geodriver_router)
 
 logger.info("Solarius Python Geostat API ready")

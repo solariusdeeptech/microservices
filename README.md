@@ -1,68 +1,82 @@
 # Solarius Microservices
 
-Microservices partagés pour les plateformes Solarius Technology :
-- **GEO-ECONOMIX** — Modélisation économique minière
-- **GeoMatrix** — (à définir)
-- **TerraExploration** — (à définir)
+Backend microservices for **Solarius DeepTech** platforms:
+- **GEO-ECONOMIX** — Mining economics & geostatistics
+- **GeoMatrix** — Advanced geological modeling
+- **TerraExploration** — Exploration data platform
 
 ## Architecture
 
 ```
-┌─────────────┐  ┌─────────────┐  ┌──────────────────┐
-│ GEO-ECONOMIX│  │  GeoMatrix  │  │ TerraExploration │
-└──────┬──────┘  └──────┬──────┘  └────────┬─────────┘
-       │                │                  │
-       └────────┬───────┴──────────────────┘
-                ▼
-     ┌──────────────────────┐
-     │  API Gateway (nginx) │  ← Auth par X-API-Key
-     └─────┬──────────┬─────┘
-           │          │
-    ┌──────▼──────┐ ┌─▼──────────────┐
-    │   Julia     │ │    Python       │
-    │  Geostat.jl │ │  PyVista + MPS  │
-    │  Port 8080  │ │  Port 8081      │
-    └─────────────┘ └─────────────────┘
+GEO-ECONOMIX ──┐
+GeoMatrix ──────┤── API Gateway (Cloud Run) ──┬── Jobs légers → Cloud Run
+TerraExploration┘   (auth, routing, metrics)  │   (python-geostat, python-viz)
+                                               │
+                                               └── Jobs lourds → Cloud Batch
+                                                   (Julia GeoStats.jl, Python heavy)
+                                                        │
+                                                        └── GCS (résultats)
 ```
 
 ## Services
 
-### Julia Geostat (port 8080)
-- `/health` — Health check
-- `/variography` — Calcul de variogrammes expérimentaux + fitting
-- `/kriging` — Krigeage ordinaire/simple
-- `/sgs` — Simulation gaussienne séquentielle
-- `/montecarlo` — Simulation Monte Carlo financière haute performance
-- `/pit-optimize` — Optimisation de fosse Lerchs-Grossmann
-- `/block-model` — Estimation modèle de blocs
+| Service | Port | Description | Cloud Run |
+|---------|------|-------------|----------|
+| **api-gateway** | 8080 | Routing, auth, metrics, Cloud Batch dispatch | 1 CPU / 1 GiB / min:1 / max:5 |
+| **python-geostat** | 8080 | Variography, kriging, SGS, Monte Carlo, ML domaining | 4 CPU / 8 GiB / min:1 / max:3 |
+| **python-viz** | 8080 | PyVista 3D, cross-sections, MPS | 2 CPU / 4 GiB / min:0 / max:2 |
+| **julia-geostat** | 8080 | GeoStats.jl heavy computation (Cloud Batch only) | Cloud Batch containers |
 
-### Python Viz (port 8081)
-- `/health` — Health check
-- `/render-3d` — Rendu 3D de modèles de blocs (export glTF/image)
-- `/mps` — Simulation multi-points (MPS)
-- `/sections` — Génération de coupes géologiques
-- `/drillholes` — Visualisation 3D de sondages
+## API Gateway Endpoints
 
-## Démarrage rapide (local)
+### Sync (Cloud Run proxy)
+```
+POST /api/variography        → python-geostat
+POST /api/kriging            → python-geostat
+POST /api/sgs                → python-geostat
+POST /api/montecarlo         → python-geostat
+POST /api/pit-optimize       → python-geostat
+POST /api/block-model        → python-geostat
+POST /api/ml-domaining       → python-geostat
+POST /api/deep-kriging       → python-geostat
+POST /api/spatial-continuity → python-geostat
+POST /api/hybrid-clustering  → python-geostat
+POST /api/envelope-geometry  → python-geostat
+POST /api/render-3d          → python-viz
+POST /api/sections           → python-viz
+POST /api/drillholes         → python-viz
+POST /api/mps                → python-viz
+```
+
+### Async (Cloud Batch)
+```
+POST /api/v1/jobs/submit                  # Submit heavy job
+GET  /api/v1/jobs/{job_id}/status         # Poll status
+GET  /api/v1/jobs/{job_id}/result         # Download result from GCS
+```
+
+### Smart Routing
+- **< 50K points / 100K blocks / 50 realizations** → Cloud Run (sync)
+- **≥ thresholds** → Cloud Batch (async)
+- Force: `?mode=async` or `?mode=sync`
+
+### Metrics
+```
+GET /api/v1/metrics                       # All platforms
+GET /api/v1/metrics?platform=geoeconomix  # Single platform
+```
+
+## Authentication
+
+All requests require `X-API-Key` header.
+
+## Local Development
 
 ```bash
-# Lancer tous les services
 docker-compose up --build
-
-# Tester
 curl http://localhost:8080/health
-curl http://localhost:8081/health
 ```
 
-## Déploiement GCP
+## Deployment
 
-Voir [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md)
-
-## Authentification multi-tenant
-
-Chaque plateforme s'authentifie via le header `X-API-Key` :
-```bash
-curl -H "X-API-Key: geoeconomix-prod-xxxx" http://api.solarius-technology.com/julia/kriging
-```
-
-Les clés API sont gérées dans le fichier `gateway/api-keys.json` (ou Secret Manager en prod).
+CI/CD: GitHub Actions → Cloud Build → Artifact Registry → Cloud Run.

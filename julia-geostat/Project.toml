@@ -1,0 +1,12 @@
+[deps]
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+GeoStats = "dcc97b0b-8ce5-5539-9008-bb190f959ef6"
+Variography = "04a0146e-e6df-5636-8d7f-62fa9eb0b20c"
+GeoStatsSolvers = "4e100066-8c72-4cfe-9c90-da283897e7c4"
+Meshes = "eacbb407-ea5a-433e-ab97-5258b1ca43fa"
+GeoTables = "e502b557-6180-4b2f-8fb7-4a9caa045a3e"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+
+[compat]
+julia = "1.10"

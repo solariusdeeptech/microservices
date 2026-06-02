@@ -23,6 +23,15 @@ jobs:
       max-parallel: 1
       matrix:
         service:
+          - name: api-gateway
+            path: api-gateway
+            memory: 1Gi
+            cpu: "1"
+            min_instances: "1"
+            max_instances: "5"
+            timeout: "600"
+            concurrency: "80"
+            build_machine: E2_HIGHCPU_8
           - name: python-geostat
             path: python-geostat
             memory: 8Gi
@@ -96,7 +105,7 @@ jobs:
             --concurrency ${{ matrix.service.concurrency }} \
             --cpu-boost \
             --no-cpu-throttling \
-            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }}" \
+            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }},PYTHON_GEOSTAT_URL=${{ secrets.PYTHON_GEOSTAT_URL }},PYTHON_VIZ_URL=${{ secrets.PYTHON_VIZ_URL }},GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},GCP_REGION=${{ env.GCP_REGION }},GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
             --allow-unauthenticated
 
       - name: Get Service URL

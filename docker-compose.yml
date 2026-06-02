@@ -6,63 +6,96 @@
 version: '3.9'
 
 services:
-  # --- Julia Geostat Service ---
-  julia-geostat:
+  # --- Python Geostat Service ---
+  python-geostat:
     build:
-      context: ./julia-geostat
+      context: ./python-geostat
       dockerfile: Dockerfile
-    container_name: solarius-julia
+    container_name: solarius-geostat
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
-      - JULIA_PORT=8080
-      - JULIA_NUM_THREADS=auto
       - API_KEY_GEOECONOMIX=${API_KEY_GEOECONOMIX:-dev-geoeconomix-key}
       - API_KEY_GEOMATRIX=${API_KEY_GEOMATRIX:-dev-geomatrix-key}
       - API_KEY_TERRAEXPLORATION=${API_KEY_TERRAEXPLORATION:-dev-terra-key}
     volumes:
-      - ./julia-geostat/src:/app/src:ro  # Hot reload in dev
+      - ./python-geostat/src:/app/src:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s  # Julia prend du temps au 1er démarrage
+      start_period: 30s
 
   # --- Python Viz Service ---
   python-viz:
     build:
       context: ./python-viz
       dockerfile: Dockerfile
-    container_name: solarius-python
+    container_name: solarius-viz
     ports:
-      - "8081:8081"
+      - "8082:8080"
     environment:
-      - PYTHON_PORT=8081
       - PYVISTA_OFF_SCREEN=true
       - API_KEY_GEOECONOMIX=${API_KEY_GEOECONOMIX:-dev-geoeconomix-key}
       - API_KEY_GEOMATRIX=${API_KEY_GEOMATRIX:-dev-geomatrix-key}
       - API_KEY_TERRAEXPLORATION=${API_KEY_TERRAEXPLORATION:-dev-terra-key}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
 
-  # --- API Gateway (nginx) ---
-  gateway:
-    image: nginx:alpine
+  # --- Julia Geostat (Cloud Batch testing) ---
+  julia-geostat:
+    build:
+      context: ./julia-geostat
+      dockerfile: Dockerfile
+    container_name: solarius-julia
+    ports:
+      - "8083:8080"
+    environment:
+      - JULIA_NUM_THREADS=auto
+      - API_KEY_GEOECONOMIX=${API_KEY_GEOECONOMIX:-dev-geoeconomix-key}
+      - API_KEY_GEOMATRIX=${API_KEY_GEOMATRIX:-dev-geomatrix-key}
+      - API_KEY_TERRAEXPLORATION=${API_KEY_TERRAEXPLORATION:-dev-terra-key}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # --- API Gateway ---
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
     container_name: solarius-gateway
     ports:
-      - "80:80"
-    volumes:
-      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - "8080:8080"
+    environment:
+      - PYTHON_GEOSTAT_URL=http://python-geostat:8080
+      - PYTHON_VIZ_URL=http://python-viz:8080
+      - API_KEY_GEOECONOMIX=${API_KEY_GEOECONOMIX:-dev-geoeconomix-key}
+      - API_KEY_GEOMATRIX=${API_KEY_GEOMATRIX:-dev-geomatrix-key}
+      - API_KEY_TERRAEXPLORATION=${API_KEY_TERRAEXPLORATION:-dev-terra-key}
+      - GCP_PROJECT_ID=microservices-497617
+      - GCS_BUCKET=solarius-jobs
+      - LOG_LEVEL=DEBUG
     depends_on:
-      julia-geostat:
+      python-geostat:
         condition: service_healthy
       python-viz:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

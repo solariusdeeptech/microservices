@@ -1,0 +1,49 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: julia-geostat
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 10
+      timeoutSeconds: 600
+      containers:
+        - image: IMAGE_PLACEHOLDER
+          ports:
+            - containerPort: 8080
+          env:
+            - name: JULIA_NUM_THREADS
+              value: "4"
+            - name: API_KEY_GEOECONOMIX
+              value: "API_KEY_GEOECONOMIX_PLACEHOLDER"
+            - name: API_KEY_GEOMATRIX
+              value: "API_KEY_GEOMATRIX_PLACEHOLDER"
+            - name: API_KEY_TERRAEXPLORATION
+              value: "API_KEY_TERRAEXPLORATION_PLACEHOLDER"
+          resources:
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5

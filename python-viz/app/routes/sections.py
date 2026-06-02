@@ -199,13 +199,18 @@ def _new_section(body: dict) -> dict | Response:
         })
     result["intersected_surfaces"] = intersected_surfaces
 
-    # 2. Project drillholes onto section
+    # 2. Project drillholes onto section (use 2D horizontal distance for band check)
     projected_drillholes = []
     for dh in drillholes:
         collar = dh.get("collar", {})
-        collar_pt = np.array([collar.get("x", 0), collar.get("y", 0), collar.get("z", 0)])
+        collar_pt_2d = np.array([collar.get("x", 0), collar.get("y", 0), 0], dtype=float)
+        line_start_2d = np.array([line_start[0], line_start[1], 0], dtype=float)
+        line_dir_2d = np.array([line_dir[0], line_dir[1], 0], dtype=float)
+        ld_norm = np.linalg.norm(line_dir_2d)
+        if ld_norm > 1e-6:
+            line_dir_2d /= ld_norm
 
-        along, perp_dist = _project_point_on_line(collar_pt, line_start, line_dir, line_length)
+        along, perp_dist = _project_point_on_line(collar_pt_2d, line_start_2d, line_dir_2d, line_length)
 
         if perp_dist <= width / 2 and 0 <= along <= line_length:
             projected = {

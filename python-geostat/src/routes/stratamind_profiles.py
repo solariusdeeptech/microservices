@@ -11,7 +11,7 @@ import time
 import logging
 import numpy as np
 from collections import defaultdict
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 @router.post("/api/stratamind-profiles")
-async def stratamind_profiles(request):
+async def stratamind_profiles(request: Request):
     t0 = time.time()
     body = await request.json()
 

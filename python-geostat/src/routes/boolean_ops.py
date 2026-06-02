@@ -5,7 +5,7 @@ Uses trimesh for mesh boolean operations.
 import time
 import logging
 import numpy as np
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def _compute_mesh_properties(vertices: np.ndarray, faces: np.ndarray) -> dict:
 
 
 @router.post("/api/boolean-ops")
-async def boolean_ops(request):
+async def boolean_ops(request: Request):
     t0 = time.time()
     body = await request.json()
 

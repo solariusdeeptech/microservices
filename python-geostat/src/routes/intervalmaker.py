@@ -14,7 +14,7 @@ import math
 import logging
 import numpy as np
 from scipy.spatial import Delaunay, ConvexHull
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -402,7 +402,7 @@ def _envelope(body: dict) -> dict:
 
 
 @router.post("/api/intervalmaker")
-async def intervalmaker_main(request):
+async def intervalmaker_main(request: Request):
     """Main intervalmaker endpoint — dispatches based on 'action' field."""
     t0 = time.time()
     body = await request.json()
@@ -426,7 +426,7 @@ async def intervalmaker_main(request):
 
 
 @router.post("/api/intervalmaker/detect")
-async def intervalmaker_detect(request):
+async def intervalmaker_detect(request: Request):
     t0 = time.time()
     body = await request.json()
     result = _detect_intervals(body)
@@ -437,7 +437,7 @@ async def intervalmaker_detect(request):
 
 
 @router.post("/api/intervalmaker/envelope")
-async def intervalmaker_envelope(request):
+async def intervalmaker_envelope(request: Request):
     t0 = time.time()
     body = await request.json()
     result = _envelope(body)

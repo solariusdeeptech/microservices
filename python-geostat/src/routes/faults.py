@@ -17,7 +17,7 @@ import time
 import math
 import logging
 import numpy as np
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -241,7 +241,7 @@ def _unfault(body: dict) -> dict:
 
 
 @router.post("/api/faults")
-async def faults_main(request):
+async def faults_main(request: Request):
     """Main faults endpoint — dispatches based on 'action' field."""
     t0 = time.time()
     body = await request.json()
@@ -267,7 +267,7 @@ async def faults_main(request):
 
 
 @router.post("/api/faults/compartmentalize")
-async def faults_compartmentalize(request):
+async def faults_compartmentalize(request: Request):
     t0 = time.time()
     body = await request.json()
     body["action"] = "compartmentalize"
@@ -277,7 +277,7 @@ async def faults_compartmentalize(request):
 
 
 @router.post("/api/faults/clip")
-async def faults_clip(request):
+async def faults_clip(request: Request):
     t0 = time.time()
     body = await request.json()
     body["action"] = "clip"
@@ -287,7 +287,7 @@ async def faults_clip(request):
 
 
 @router.post("/api/faults/unfault")
-async def faults_unfault(request):
+async def faults_unfault(request: Request):
     t0 = time.time()
     body = await request.json()
     if "action" not in body:

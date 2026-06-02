@@ -101,6 +101,7 @@ async def info():
                 "/api/ml-domaining", "/api/deep-kriging",
                 "/api/spatial-continuity", "/api/hybrid-clustering",
                 "/api/envelope-geometry",
+                "/api/boolean-ops", "/api/faults", "/api/intervalmaker", "/api/stratamind-profiles",
                 "/api/render-3d", "/api/sections", "/api/drillholes", "/api/mps",
             ],
             "async": [

@@ -30,6 +30,11 @@ SERVICE_MAP = {
     "spatial-continuity": settings.PYTHON_GEOSTAT_URL,
     "hybrid-clustering": settings.PYTHON_GEOSTAT_URL,
     "envelope-geometry": settings.PYTHON_GEOSTAT_URL,
+    # GEO-MATRIX endpoints (python-geostat)
+    "boolean-ops": settings.PYTHON_GEOSTAT_URL,
+    "faults": settings.PYTHON_GEOSTAT_URL,
+    "intervalmaker": settings.PYTHON_GEOSTAT_URL,
+    "stratamind-profiles": settings.PYTHON_GEOSTAT_URL,
     # Python Viz endpoints
     "render-3d": settings.PYTHON_VIZ_URL,
     "sections": settings.PYTHON_VIZ_URL,

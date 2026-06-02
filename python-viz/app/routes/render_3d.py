@@ -67,7 +67,7 @@ class Render3DRequest(BaseModel):
     options: RenderOptions = RenderOptions()
 
 
-@router.post("/render-3d")
+@router.post("/api/render-3d")
 async def render_3d(req: Render3DRequest):
     start = time.time()
 

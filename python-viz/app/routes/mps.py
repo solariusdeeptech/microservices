@@ -156,7 +156,7 @@ def simulate_mps(
     return grid
 
 
-@router.post("/mps")
+@router.post("/api/mps")
 async def run_mps(req: MPSRequest):
     start = time.time()
 

@@ -23,6 +23,10 @@ from src.routes.block_model import router as block_model_router
 from src.routes.ml_domaining import router as ml_domaining_router
 from src.routes.geodriver import geodriver_router
 from src.routes.deep_kriging import router as deep_kriging_router
+from src.routes.boolean_ops import router as boolean_ops_router
+from src.routes.faults import router as faults_router
+from src.routes.intervalmaker import router as intervalmaker_router
+from src.routes.stratamind_profiles import router as stratamind_profiles_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -62,7 +66,8 @@ async def health():
             "montecarlo", "pit_optimization", "block_model_estimation",
             "ml_domaining",
             "spatial_continuity", "hybrid_clustering", "envelope_geometry",
-            "deep_kriging"
+            "deep_kriging",
+            "boolean_ops", "faults", "intervalmaker", "stratamind_profiles"
         ]
     }
 
@@ -76,5 +81,9 @@ app.include_router(block_model_router)
 app.include_router(ml_domaining_router)
 app.include_router(geodriver_router)
 app.include_router(deep_kriging_router)
+app.include_router(boolean_ops_router)
+app.include_router(faults_router)
+app.include_router(intervalmaker_router)
+app.include_router(stratamind_profiles_router)
 
 logger.info("Solarius Python Geostat API ready")

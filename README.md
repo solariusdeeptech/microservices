@@ -26,6 +26,7 @@ TerraExploration┘   (auth, routing, metrics)  │   (python-geostat, python-vi
 | **python-geostat** | 8080 | Variography, kriging, SGS, Monte Carlo, ML domaining | 4 CPU / 8 GiB / min:1 / max:3 |
 | **python-viz** | 8080 | PyVista 3D, cross-sections, MPS | 2 CPU / 4 GiB / min:0 / max:2 |
 | **julia-geostat** | 8080 | GeoStats.jl heavy computation (Cloud Batch only) | Cloud Batch containers |
+| **solreel-render** | 8080 | SolReel animated-video rendering (Playwright + FFmpeg → MP4 on GCS) | 4 CPU / 8 GiB / min:1 / max:3 / concurrency:1 |
 
 ## API Gateway Endpoints
 

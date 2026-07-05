@@ -50,6 +50,15 @@ jobs:
             timeout: "300"
             concurrency: "10"
             build_machine: E2_HIGHCPU_8
+          - name: solreel-render
+            path: solreel-render
+            memory: 8Gi
+            cpu: "4"
+            min_instances: "1"
+            max_instances: "3"
+            timeout: "600"
+            concurrency: "1"
+            build_machine: E2_HIGHCPU_8
 
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +114,7 @@ jobs:
             --concurrency ${{ matrix.service.concurrency }} \
             --cpu-boost \
             --no-cpu-throttling \
-            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }},PYTHON_GEOSTAT_URL=${{ secrets.PYTHON_GEOSTAT_URL }},PYTHON_VIZ_URL=${{ secrets.PYTHON_VIZ_URL }},GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},GCP_REGION=${{ env.GCP_REGION }},GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
+            --set-env-vars="API_KEY_GEOECONOMIX=${{ secrets.API_KEY_GEOECONOMIX }},API_KEY_GEOMATRIX=${{ secrets.API_KEY_GEOMATRIX }},API_KEY_TERRAEXPLORATION=${{ secrets.API_KEY_TERRAEXPLORATION }},PYTHON_GEOSTAT_URL=${{ secrets.PYTHON_GEOSTAT_URL }},PYTHON_VIZ_URL=${{ secrets.PYTHON_VIZ_URL }},GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},GCP_REGION=${{ env.GCP_REGION }},GCS_BUCKET=${{ secrets.GCS_BUCKET }},GCS_BUCKET_SOLREEL=${{ secrets.GCS_BUCKET_SOLREEL }},SOLREEL_API_KEY=${{ secrets.SOLREEL_API_KEY }}" \
             --allow-unauthenticated
 
       - name: Get Service URL

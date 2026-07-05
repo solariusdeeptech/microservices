@@ -1,0 +1,21 @@
+{
+  "name": "solreel-render",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SolReel animated-video render microservice (Playwright + FFmpeg + GCS) for Solarius DeepTech",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.14.0",
+    "express": "^4.21.2",
+    "playwright": "1.49.1",
+    "uuid": "^11.0.3",
+    "zod": "^3.24.1"
+  }
+}

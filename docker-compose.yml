@@ -99,3 +99,24 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # --- SolReel Render Service (Playwright + FFmpeg) ---
+  solreel-render:
+    build:
+      context: ./solreel-render
+      dockerfile: Dockerfile
+    container_name: solarius-solreel-render
+    ports:
+      - "8084:8080"
+    environment:
+      - GCP_PROJECT_ID=microservices-497617
+      - GCP_REGION=europe-west1
+      - GCS_BUCKET_SOLREEL=${GCS_BUCKET_SOLREEL:-solreel-renders}
+      - SOLREEL_API_KEY=${SOLREEL_API_KEY:-dev-solreel-key}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

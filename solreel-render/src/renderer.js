@@ -7,13 +7,47 @@ import { chromium } from 'playwright';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { log } from './logger.js';
+import { redactActionInPlace } from './redact.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Resolve the selector for an action, preferring the canonical `target`,
+// falling back to the legacy `selector` field.
+const selectorOf = (action) => action.target || action.selector || null;
+
+// Split a possibly comma-separated multi-selector into individual selectors.
+const splitSelectors = (sel) =>
+  String(sel)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+/**
+ * Fill a form field robustly.
+ * Uses locator().first().fill() (works with React/Vue controlled inputs, unlike
+ * key-by-key type()). If the composite multi-selector fails, retries each
+ * individual selector in turn. NEVER logs the value being typed.
+ */
+async function robustFill(page, sel, value) {
+  const candidates = [sel, ...splitSelectors(sel)];
+  let lastErr;
+  for (const candidate of candidates) {
+    try {
+      await page.locator(candidate).first().fill(String(value), { timeout: 8000 });
+      return true;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  // Log the failure WITHOUT the value (credential safety): only type + target.
+  log.warn('type failed (ignored, continuing)', { type: 'type', target: sel, err: String(lastErr) });
+  return false;
+}
 
 async function runAction(page, action, ctx) {
   switch (action.type) {
     case 'navigate': {
-      const url = action.url || ctx.fallbackUrl;
+      const url = action.target || action.url || ctx.fallbackUrl;
       await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 }).catch(async () => {
         // networkidle can hang on live apps; fall back to domcontentloaded
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -21,12 +55,16 @@ async function runAction(page, action, ctx) {
       break;
     }
     case 'wait': {
+      // Honor requested duration (login redirects need a real pause).
       await sleep(action.durationMs || 1000);
       break;
     }
     case 'scroll': {
+      // `value` (px) is the canonical vertical offset; fall back to legacy x/y.
+      const numericValue = typeof action.value === 'number' ? action.value : Number(action.value);
+      const hasValue = action.value != null && !Number.isNaN(numericValue);
       const x = action.x || 0;
-      const y = action.y != null ? action.y : 600;
+      const y = hasValue ? numericValue : action.y != null ? action.y : 600;
       await page.evaluate(
         ([sx, sy]) => window.scrollBy({ left: sx, top: sy, behavior: 'smooth' }),
         [x, y]
@@ -35,27 +73,37 @@ async function runAction(page, action, ctx) {
       break;
     }
     case 'click': {
-      if (action.selector) {
-        await page.click(action.selector, { timeout: 15000 }).catch((e) =>
-          log.warn('click failed (ignored)', { selector: action.selector, err: String(e) })
-        );
+      const sel = selectorOf(action);
+      if (sel) {
+        try {
+          await page.locator(sel).first().click({ timeout: 15000 });
+          // A login click frequently triggers a redirect / SPA route change.
+          await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+        } catch (e) {
+          // Non-standard form / missing button: log & CONTINUE the scenario.
+          log.warn('click failed (ignored, continuing)', { target: sel, err: String(e) });
+        }
       }
       break;
     }
     case 'hover': {
-      if (action.selector) {
-        await page.hover(action.selector, { timeout: 15000 }).catch((e) =>
-          log.warn('hover failed (ignored)', { selector: action.selector, err: String(e) })
+      const sel = selectorOf(action);
+      if (sel) {
+        await page.locator(sel).first().hover({ timeout: 15000 }).catch((e) =>
+          log.warn('hover failed (ignored)', { target: sel, err: String(e) })
         );
       }
       break;
     }
     case 'type': {
-      if (action.selector && action.text != null) {
-        await page
-          .type(action.selector, action.text, { delay: action.delayMs ?? 40 })
-          .catch((e) => log.warn('type failed (ignored)', { err: String(e) }));
+      const sel = selectorOf(action);
+      const value = action.value != null ? action.value : action.text;
+      if (sel && value != null) {
+        await robustFill(page, sel, value);
       }
+      // CREDENTIAL CLEANUP: wipe the plaintext from the in-memory scenario the
+      // instant it has been used, so it cannot leak via a crash dump.
+      redactActionInPlace(action);
       break;
     }
     case 'capture_start': {

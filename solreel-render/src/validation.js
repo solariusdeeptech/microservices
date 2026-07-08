@@ -13,7 +13,13 @@ const actionSchema = z.object({
     'capture_start',
     'capture_end',
   ]),
-  // Optional fields depending on action type
+  // ---- Unified contract (SolReel canonical): target + value ----
+  // `target`  : URL (navigate) OR CSS selector, possibly a comma-separated
+  //             multi-selector, for click/hover/type/scroll.
+  // `value`   : text to type, or a numeric scroll offset (px).
+  target: z.string().optional(),
+  value: z.union([z.string(), z.number()]).optional(),
+  // ---- Legacy fields (kept for backward compatibility) ----
   url: z.string().url().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),

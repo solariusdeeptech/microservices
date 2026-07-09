@@ -1,0 +1,21 @@
+{
+  "name": "mediaforge-process",
+  "version": "2.0.0",
+  "private": true,
+  "description": "MediaForge media-processing microservice (FFmpeg + GCS) for Solarius DeepTech — offloads heavy video/audio/GIF jobs from the 600s FFmpeg limit",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.14.0",
+    "archiver": "^7.0.1",
+    "express": "^4.21.2",
+    "uuid": "^11.0.3",
+    "zod": "^3.24.1"
+  }
+}
